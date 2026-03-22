@@ -36,6 +36,7 @@ func htons(i uint16) uint16 {
 
 // ネットデバイスの送信処理
 func (netdev *netDevice) netDeviceTransmit(data []byte) error {
+	// インターフェースに bind したソケットにパケットを送信する
 	err := syscall.Sendto(netdev.socket, data, 0, &netdev.sockaddr)
 	if err != nil {
 		return err

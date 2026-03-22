@@ -59,8 +59,9 @@ func ethernetInput(netdev *netDevice, packet []byte) {
 	netdev.etheHeader.srcAddr = setMacAddr(packet[6:12])
 	netdev.etheHeader.etherType = byteToUint16(packet[12:14])
 
-	// 自分の MAC アドレス宛かあるいはブロードキャストかを確認し、どちらでもなければ early return
+	// 自分の MAC アドレス宛かあるいはブロードキャストかを確認する
 	if netdev.macaddr != netdev.etheHeader.destAddr && netdev.etheHeader.destAddr != ETHERNET_ADDRESS_BROADCAST {
+		// どちらでもなければ何もしない
 		return
 	}
 
@@ -74,9 +75,7 @@ func ethernetInput(netdev *netDevice, packet []byte) {
 	}
 }
 
-/*
-イーサネットでカプセル化して送信する
-*/
+// イーサネットでカプセル化して送信する
 func ethernetOutput(netdev *netDevice, destAddr [6]uint8, packet []byte, ethType uint16) {
 	// イーサネットヘッダを持つパケットを作成する
 	ethHeaderPacket := ethernetHeader{
