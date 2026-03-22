@@ -1,6 +1,11 @@
 package main
 
-import "fmt"
+import (
+	"bytes"
+	"fmt"
+	"net"
+	"strings"
+)
 
 const IP_ADDRESS_LEN = 4
 const IP_ADDRESS_LIMITED_BROADCAST uint32 = 0xffffffff
@@ -10,7 +15,7 @@ const IP_PROTOCOL_NUM_UDP uint8 = 0x11
 
 type ipDevice struct {
 	address   uint32 // デバイスの IP アドレス
-	network   uint32 // サブネットマスク
+	netmask   uint32 // サブネットマスク
 	broadcast uint32 // directed broadcast address: サブネット内の全ホストにブロードキャストするためのアドレス
 }
 
@@ -26,6 +31,49 @@ type ipHeader struct {
 	headerChecksum uint16 // IP ヘッダのチェックサム
 	srcAddr        uint32 // 送信元 IP アドレス
 	destAddr       uint32 // 宛先 IP アドレス
+}
+
+func (ipheader ipHeader) ToPacket(calc bool) (ipHeaderByte []byte) {
+	var b bytes.Buffer
+
+	b.Write([]byte{ipheader.version<<4 + ipheader.headerLen})
+	b.Write([]byte{ipheader.tos})
+	b.Write(uint16ToByte(ipheader.totalLen))
+	b.Write(uint16ToByte(ipheader.identify))
+	b.Write(uint16ToByte(ipheader.fragOffset))
+	b.Write([]byte{ipheader.ttl})
+	b.Write([]byte{ipheader.protocol})
+
+	b.Write(uint16ToByte(ipheader.headerChecksum))
+	b.Write(uint32ToByte(ipheader.srcAddr))
+	b.Write(uint32ToByte(ipheader.destAddr))
+
+	if calc {
+		ipHeaderByte = b.Bytes()
+		checksum := calcChecksum(ipHeaderByte)
+		// 計算済のチェックサムをセット
+		ipHeaderByte[10] = checksum[0]
+		ipHeaderByte[11] = checksum[1]
+	} else {
+		ipHeaderByte = b.Bytes()
+	}
+
+	return ipHeaderByte
+}
+
+func getIPdevice(addrs []net.Addr) (ipdev ipDevice) {
+	for _, addr := range addrs {
+		// IPv6 ではなく IPv4 アドレスをリターン
+		ipaddrstr := addr.String()
+		if !strings.Contains(ipaddrstr, ":") && strings.Contains(ipaddrstr, ".") {
+			ip, ipnet, _ := net.ParseCIDR(ipaddrstr)
+			ipdev.address = byteToUint32(ip.To4())
+			ipdev.netmask = byteToUint32(ipnet.Mask)
+			// directed broadcast address は、IP アドレスとサブネットマスクから計算できる
+			ipdev.broadcast = ipdev.address | (^ipdev.netmask)
+		}
+	}
+	return ipdev
 }
 
 func printIPAddr(ip uint32) string {

@@ -9,5 +9,7 @@ func main() {
 
 	if mode == "ch1" {
 		runChapter1()
+	} else {
+		runChapter2(mode)
 	}
 }
