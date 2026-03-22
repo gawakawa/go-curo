@@ -159,9 +159,7 @@ func searchArpTableEntry(ipaddr uint32) ([6]uint8, *netDevice) {
 	return [6]uint8{}, nil
 }
 
-/*
-ARP リプライパケットの受信処理
-*/
+// ARP リプライパケットの受信処理
 func arpReplyArrives(netdev *netDevice, arp arpIPToEthernet) {
 	// IP アドレスが設定されているデバイスからの受信だったときのみ受理する
 	if netdev.ipdev.address != 00000000 {
@@ -169,4 +167,23 @@ func arpReplyArrives(netdev *netDevice, arp arpIPToEthernet) {
 		// ARP テーブルエントリを追加する
 		addArpTableEntry(netdev, arp.senderIPAddr, arp.senderHardwareAddr)
 	}
+}
+
+// ARP リクエストを送信する
+func sendArpRequest(netdev *netDevice, targetip uint32) {
+	fmt.Printf("Sending arp request via %s for %x\n", netdev.name, targetip)
+	// ARP リクエストのパケットを作成する
+	arpPacket := arpIPToEthernet{
+		hardwareType:       ARP_HTYPE_ETHERNET,
+		protocolType:       ETHER_TYPE_ARP,
+		hardwareLen:        ETHERNET_ADDRESS_LEN,
+		protocolLen:        IP_ADDRESS_LEN,
+		opcode:             ARP_OPERATION_CODE_REQUEST,
+		senderHardwareAddr: netdev.macaddr,
+		senderIPAddr:       netdev.ipdev.address,
+		targetHardwareAddr: ETHERNET_ADDRESS_BROADCAST,
+		targetIPAddr:       targetip,
+	}.ToPacket()
+	// ethernet でカプセル化して送信
+	ethernetOutput(netdev, ETHERNET_ADDRESS_BROADCAST, arpPacket, ETHER_TYPE_ARP)
 }
