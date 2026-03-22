@@ -11,19 +11,19 @@ const IP_PROTOCOL_NUM_UDP uint8 = 0x11
 type ipDevice struct {
 	address   uint32 // デバイスの IP アドレス
 	network   uint32 // サブネットマスク
-	broadcast uint32 // ブロードキャストアドレス
+	broadcast uint32 // directed broadcast address: サブネット内の全ホストにブロードキャストするためのアドレス
 }
 
 type ipHeader struct {
-	version        uint8  // バージョン
-	headerLen      uint8  // ヘッダ長
-	tos            uint8  // Type of Service パケットの優先度や転送方法を指定する
+	version        uint8  // バージョン番号 (IPv4 なら 4)
+	headerLen      uint8  // IP ヘッダの byte 数
+	tos            uint8  // IP パケットの優先順位を指定する値
 	totalLen       uint16 // トータルパケット長
-	identify       uint16 // 識別番号
+	identify       uint16 // 個々のパケットを識別するための番号
 	fragOffset     uint16 // パケットの分割に関する情報
-	ttl            uint8  // Time To Live
+	ttl            uint8  // パケットの生存時間
 	protocol       uint8  // 上位プロトコルの番号
-	headerChecksum uint16 // ヘッダのチェックサム
+	headerChecksum uint16 // IP ヘッダのチェックサム
 	srcAddr        uint32 // 送信元 IP アドレス
 	destAddr       uint32 // 宛先 IP アドレス
 }
@@ -84,28 +84,35 @@ func ipInput(inputdev *netDevice, packet []byte) {
 		return
 	}
 
-	// 宛先アドレスがブロードキャストアドレスか、受信した NIC の IP アドレスの場合、自分宛の通信として処理する
+	// 宛先アドレスが limited broadcast address か、受信した NIC の IP アドレスの場合
 	if ipheader.destAddr == IP_ADDRESS_LIMITED_BROADCAST || inputdev.ipdev.address == ipheader.destAddr {
+		// 自分宛の通信として処理する
 		ipInputToOurs(inputdev, &ipheader, packet[20:])
 		return
 	}
 
 	// 宛先 IP アドレスをルータが持っているか調べる
-	// for _, dev := range netDeviceList {
-	// 	// 宛先 IP アドレスが、ルータの持っている IP アドレス or ディレクテッド・ブロードキャストアドレスの場合
-	// 	if dev.ipdev.address == ipheader.destAddr || dev.ipdev.broadcast == ipheader.destAddr {
-	// 		ipInputToOurs(inputdev, &ipheader, packet[20:])
-	// 		return
-	// 	}
-	// }
+	for _, dev := range netDeviceList {
+		// 宛先 IP アドレスが、ルータの持っている IP アドレス or directed broadcast address の場合
+		if dev.ipdev.address == ipheader.destAddr || dev.ipdev.broadcast == ipheader.destAddr {
+			// 自分宛の通信として処理する
+			ipInputToOurs(inputdev, &ipheader, packet[20:])
+			return
+		}
+	}
+
+	// TODO: フォワーディング処理を実装
 }
 
 // 自分宛の IP パケットの処理
 func ipInputToOurs(inputdev *netDevice, ipheader *ipHeader, packet []byte) {
+	// TODO: NAT を実装
+
 	// 上位プロトコルの処理に移行
 	switch ipheader.protocol {
 	case IP_PROTOCOL_NUM_ICMP:
 		fmt.Println("ICMP received")
+		icmpInput(inputdev, ipheader.srcAddr, ipheader.destAddr, packet)
 	case IP_PROTOCOL_NUM_UDP:
 		fmt.Printf("udp received: %x\n", packet)
 	case IP_PROTOCOL_NUM_TCP:
@@ -115,4 +122,42 @@ func ipInputToOurs(inputdev *netDevice, ipheader *ipHeader, packet []byte) {
 		return
 	}
 
+}
+
+// IP パケットを送信する
+func ipPacketEncapsulateOutput(inputdev *netDevice, destAddr, srcAddr uint32, payload []byte, protocolType uint8) {
+	var ipPacket []byte
+
+	// IP ヘッダで必要な IP パケットの全長を算出する
+	// ヘッダ長 (20 byte) + パケット長
+	totalLength := 20 + len(payload)
+
+	// IP ヘッダを構築
+	ipheader := ipHeader{
+		version:        4,
+		headerLen:      20 / 4,
+		tos:            0,
+		totalLen:       uint16(totalLength),
+		identify:       0xf80c,
+		fragOffset:     2 << 13,
+		ttl:            0x40,
+		protocol:       protocolType,
+		headerChecksum: 0, // 計算前は 0 をセットしておく
+		srcAddr:        srcAddr,
+		destAddr:       destAddr,
+	}
+	// IP ヘッダをパケットに追加する
+	ipPacket = append(ipPacket, ipheader.ToPacket(true)...)
+	// payload をパケットに追加する
+	ipPacket = append(ipPacket, payload...)
+
+	// ルートテーブルに送信先 IP アドレスの MAC アドレスがあるかを確認する
+	destMacAddr, _ := searchArpTableEntry(destAddr)
+	if destMacAddr != [6]uint8{0, 0, 0, 0, 0, 0} {
+		// ルートテーブルに送信先 IP アドレスの MAC アドレスがあれば送信する
+		ethernetOutput(inputdev, destMacAddr, ipPacket, ETHER_TYPE_IP)
+	} else {
+		// ルートテーブルに送信先 IP アドレスの MAC アドレスがなければ ARP リクエストを出す
+		sendArpRequest(inputdev, destAddr)
+	}
 }

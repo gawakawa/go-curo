@@ -12,7 +12,7 @@ type netDevice struct {
 	socket     int
 	sockaddr   syscall.SockaddrLinklayer
 	etheHeader ethernetHeader
-	ipdev      ipDevice
+	ipdev      ipDevice // ルータの NW インターフェースにセットされた IP アドレスなどの情報を保持する
 }
 
 var IGNORE_INTERFACES = []string{
