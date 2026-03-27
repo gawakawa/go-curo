@@ -19,6 +19,19 @@ type ipDevice struct {
 	broadcast uint32 // directed broadcast address: サブネット内の全ホストにブロードキャストするためのアドレス
 }
 
+type ipRouteType uint8
+
+const (
+	connected ipRouteType = iota
+	network
+)
+
+type ipRouteEntry struct {
+	iptype  ipRouteType
+	netdev  *netDevice
+	nexthop uint32
+}
+
 type ipHeader struct {
 	version        uint8  // バージョン番号 (IPv4 なら 4)
 	headerLen      uint8  // IP ヘッダの byte 数
@@ -59,6 +72,16 @@ func (ipheader ipHeader) ToPacket(calc bool) (ipHeaderByte []byte) {
 	}
 
 	return ipHeaderByte
+}
+
+// サブネットマスクからプレフィックス長を計算する
+func subnetToPrefixLen(netmask uint32) int {
+	prefixLen := 0
+	for netmask != 0 {
+		prefixLen++
+		netmask <<= 1
+	}
+	return prefixLen
 }
 
 func getIPdevice(addrs []net.Addr) (ipdev ipDevice) {

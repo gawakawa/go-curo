@@ -1,5 +1,26 @@
 package main
 
+/*
+Network topology
+
++-------+      +----------+      +----------+      +-------+
+| host1 |------| router1  |------| router2  |------| host2 |
++-------+      +----------+      +----------+      +-------+
+ .1.2           .1.1  .0.1        .0.2  .2.1        .2.2
+
+        <------>        <-------->        <------>
+      192.168.1.0/24  192.168.0.0/24  192.168.2.0/24
+
+IP Addresses:
+  host1:   192.168.1.2  (gw: 192.168.1.1)
+  router1: 192.168.1.1, 192.168.0.1
+  router2: 192.168.0.2, 192.168.2.1  (ip_forward=1)
+  host2:   192.168.2.2  (gw: 192.168.2.1)
+
+go-curo runs in router1 namespace as a software router.
+Routing table: 192.168.2.0/24 via 192.168.0.2 (router2)
+*/
+
 import (
 	"fmt"
 	"log"
@@ -7,9 +28,25 @@ import (
 	"syscall"
 )
 
+// ルーティングテーブル
+var iproute radixTreeNode
+
 var netDeviceList []*netDevice
 
 func runChapter2(mode string) {
+	const (
+		router2IP    = 0xc0a80002 // 192.168.0.2
+		host2Network = 0xc0a80200 // 192.168.2.0
+	)
+
+	// 直接接続ではない host2 へのルーティングを登録する
+	routeEntryToHost2 := ipRouteEntry{
+		iptype:  network,
+		nexthop: router2IP,
+	}
+	// 192.168.2.0/24 の経路の登録
+	iproute.radixTreeAdd(host2Network&0xffffff00, 24, routeEntryToHost2)
+
 	// epoll 作成
 	events := make([]syscall.EpollEvent, 10)
 	epfd, err := syscall.EpollCreate1(0)
@@ -57,6 +94,14 @@ func runChapter2(mode string) {
 				ipdev:    getIPdevice(netaddrs),
 			}
 
+			// 直接接続ネットワークの経路をルートテーブルのエントリに設定
+			routeEntry := ipRouteEntry{
+				iptype: connected,
+				netdev: &netdev,
+			}
+			prefixLen := subnetToPrefixLen(netdev.ipdev.netmask)
+			iproute.radixTreeAdd(netdev.ipdev.address&netdev.ipdev.netmask, prefixLen, routeEntry)
+
 			netDeviceList = append(netDeviceList, &netdev)
 		}
 	}
@@ -67,7 +112,7 @@ func runChapter2(mode string) {
 		if err != nil {
 			log.Fatalf("epoll wait err: %s", err)
 		}
-		for i := 0; i < nfds; i++ {
+		for i := range nfds {
 			// デバイスから通信を受信
 			for _, netdev := range netDeviceList {
 				// イベントがあったソケットとマッチしたらパケットを読み込む処理を実行する
