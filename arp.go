@@ -54,10 +54,7 @@ func addArpTableEntry(netdev *netDevice, ipaddr uint32, macaddr [6]uint8) {
 			// IP アドレスは同じだが Mac アドレスが異なる場合は更新する
 			if arpTable.ipAddr == ipaddr && arpTable.macAddr != macaddr {
 				arpTable.macAddr = macaddr
-			}
-			// Mac アドレスは同じだが IP アドレスが異なる場合は更新する
-			if arpTable.macAddr == macaddr && arpTable.ipAddr != ipaddr {
-				arpTable.ipAddr = ipaddr
+				return
 			}
 			// IP アドレスと Mac アドレスが全く同じエントリがすでに存在する場合は何もせず終了
 			if arpTable.macAddr == macaddr && arpTable.ipAddr == ipaddr {
