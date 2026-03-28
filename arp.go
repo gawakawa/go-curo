@@ -175,7 +175,7 @@ func sendArpRequest(netdev *netDevice, targetip uint32) {
 	// ARP リクエストのパケットを作成する
 	arpPacket := arpIPToEthernet{
 		hardwareType:       ARP_HTYPE_ETHERNET,
-		protocolType:       ETHER_TYPE_ARP,
+		protocolType:       ETHER_TYPE_IP,
 		hardwareLen:        ETHERNET_ADDRESS_LEN,
 		protocolLen:        IP_ADDRESS_LEN,
 		opcode:             ARP_OPERATION_CODE_REQUEST,
