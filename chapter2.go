@@ -85,6 +85,10 @@ func runChapter2(mode string) {
 		}
 	}
 
+	if mode == "ch5" {
+		configureIPNat("router1-br0", getnetDeviceByName("router1-router2").ipdev.address)
+	}
+
 	for {
 		// epoll_wait でパケットの受信を待つ
 		nfds, err := syscall.EpollWait(epfd, events, -1)

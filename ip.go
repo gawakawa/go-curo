@@ -173,6 +173,28 @@ func ipInput(inputdev *netDevice, packet []byte) {
 		}
 	}
 
+	var natPacket []byte
+	// NAT の内側から外側への通信
+	if inputdev.ipdev.natdev != (natDevice{}) {
+		var err error
+		switch ipheader.protocol {
+		case IP_PROTOCOL_NUM_UDP:
+			natPacket, err = natExec(&ipheader, natPacketHeader{packet: packet[20:]}, inputdev.ipdev.natdev, udp, outgoing)
+			if err != nil {
+				// NAT できないパケットはドロップ
+				fmt.Printf("nat udp packet err is %s\n", err)
+				return
+			}
+		case IP_PROTOCOL_NUM_TCP:
+			natPacket, err = natExec(&ipheader, natPacketHeader{packet: packet[20:]}, inputdev.ipdev.natdev, tcp, outgoing)
+			if err != nil {
+				// NAT できないパケットはドロップ
+				fmt.Printf("nat tcp packet err is %s\n", err)
+				return
+			}
+		}
+	}
+
 	// 宛先 IP アドレスがルータの持っている IP アドレスでない場合はフォワーディングを行う
 	route := iproute.radixTreeSearch(ipheader.destAddr)
 	if route == (ipRouteEntry{}) {
@@ -193,17 +215,18 @@ func ipInput(inputdev *netDevice, packet []byte) {
 	ipheader.headerChecksum = byteToUint16(calcChecksum(ipheader.ToPacket(true)))
 
 	forwardPacket := ipheader.ToPacket(true)
-	var natPacket []byte
 	if inputdev.ipdev.natdev != (natDevice{}) { // NAT 変換後は送信元を置き換えて送信
 		forwardPacket = append(forwardPacket, natPacket...)
 	} else { // 元のペイロードをそのまま送信
 		forwardPacket = append(forwardPacket, packet[20:]...)
 	}
 
-	if route.iptype == connected { // 直接接続ネットワークの経路なら
-		// host に直接送信
+	switch route.iptype {
+	// 直接接続ネットワークの経路なら host に直接送信
+	case connected:
 		ipPacketOutputToHost(route.netdev, ipheader.destAddr, forwardPacket)
-	} else { // 直接接続ネットワークの経路ではなかったら
+	// 直接接続ネットワークの経路ではなかったら
+	default:
 		fmt.Printf("next hop is %s\n", printIPAddr(route.nexthop))
 		fmt.Printf("forward packet is %x : %x\n", forwardPacket[0:20], natPacket)
 		ipPacketOutputToNexthop(route.nexthop, forwardPacket)
@@ -212,7 +235,36 @@ func ipInput(inputdev *netDevice, packet []byte) {
 
 // 自分宛の IP パケットの処理
 func ipInputToOurs(inputdev *netDevice, ipheader *ipHeader, packet []byte) {
-	// TODO: NAT を実装
+	// NAT の外側から内側への通信か判断
+	for _, dev := range netDeviceList {
+		if dev.ipdev != (ipDevice{}) && dev.ipdev.natdev != (natDevice{}) && dev.ipdev.natdev.outsideIpAddr == ipheader.destAddr { // 送信先の IP が NAT の外側の IP なら
+			// NAT の戻りのパケットを DNAT する
+			natExecuted := false
+			var destPacket []byte
+			var err error
+			switch ipheader.protocol {
+			case IP_PROTOCOL_NUM_UDP:
+				destPacket, err = natExec(ipheader, natPacketHeader{packet: packet}, dev.ipdev.natdev, udp, incoming)
+				if err != nil {
+					return
+				}
+				natExecuted = true
+			case IP_PROTOCOL_NUM_TCP:
+				destPacket, err = natExec(ipheader, natPacketHeader{packet: packet}, dev.ipdev.natdev, tcp, incoming)
+				if err != nil {
+					return
+				}
+				natExecuted = true
+			}
+			if natExecuted {
+				ipPacket := ipheader.ToPacket(false)
+				ipPacket = append(ipPacket, destPacket...)
+				fmt.Printf("To dest is %s, checksum is %x, packet is %x\n", printIPAddr(ipheader.destAddr), ipheader.headerChecksum, ipPacket)
+				ipPacketOutput(dev, iproute, ipheader.destAddr, ipPacket)
+				return
+			}
+		}
+	}
 
 	// 上位プロトコルの処理に移行
 	switch ipheader.protocol {
@@ -260,6 +312,24 @@ func ipPacketOutputToNexthop(nextHop uint32, packet []byte) {
 	} else { // ARP エントリがあったら
 		// ARP テーブルから取得した MAC アドレスに向けてパケットをイーサネットでカプセル化して送信する
 		ethernetOutput(dev, destMacAddr, packet, ETHER_TYPE_IP)
+	}
+}
+
+// IP パケットを送信する
+func ipPacketOutput(outputdev *netDevice, routeTree radixTreeNode, destAddr uint32, packet []byte) {
+	// 宛先 IP アドレスへの経路を探索
+	route := routeTree.radixTreeSearch(destAddr)
+	if route == (ipRouteEntry{}) { // 経路が見つからなかったら
+		fmt.Printf("No route to %s\n", printIPAddr(destAddr))
+	}
+
+	switch route.iptype {
+	// 直接接続されたネットワークだったら
+	case connected:
+		ipPacketOutputToHost(outputdev, destAddr, packet)
+	// 直接つながっていないネットワークだったら
+	case network:
+		ipPacketOutputToNexthop(destAddr, packet)
 	}
 }
 
