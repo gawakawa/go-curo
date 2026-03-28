@@ -7,6 +7,7 @@ _: {
         ++ config.pre-commit.settings.enabledPackages
         ++ (with pkgs; [
           ethtool
+          wireshark
         ]);
     in
     {
