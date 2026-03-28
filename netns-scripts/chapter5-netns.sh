@@ -1,4 +1,24 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+# Network topology
+#
+# +-------+
+# | host0 |---+
+# +-------+   |      +----------+      +----------+      +-------+
+#  .1.3      br0-----| router1  |------| router2  |------| host2 |
+# +-------+   |      +----------+      +----------+      +-------+
+# | host1 |---+       .1.1  .0.1        .0.2  .2.1        .2.2
+# +-------+
+#  .1.2
+#
+# IP Addresses:
+#   host0:   192.168.1.3/24  (gw: 192.168.1.1)
+#   host1:   192.168.1.2/24  (gw: 192.168.1.1)
+#   router1: 192.168.1.1/24, 192.168.0.1/24  (ip_forward=0)
+#   router2: 192.168.0.2/24, 192.168.2.1/24  (ip_forward=1)
+#   host2:   192.168.2.2/24  (gw: 192.168.2.1)
+#
+# go-curo runs in router1 namespace as a software router.
 
 # rootユーザーが必要
 if [ $UID -ne 0 ]; then
